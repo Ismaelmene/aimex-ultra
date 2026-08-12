@@ -11,4 +11,5 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
-const storage = firebase.storage();
+let storage = null;
+try{ storage = firebase.storage(); }catch(e){ /* Storage (plano pago) ainda não ativado — segue sem foto */ }
