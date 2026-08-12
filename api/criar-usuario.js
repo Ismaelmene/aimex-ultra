@@ -14,7 +14,7 @@ const db = admin.firestore();
 
 const SETORES_VALIDOS = [
   'veterinario', 'estrutural', 'maquinario',
-  'nutricional', 'financeiro', 'admin'
+  'nutricional', 'financeiro', 'admin', 'estoque'
 ];
 
 module.exports = async (req, res) => {
