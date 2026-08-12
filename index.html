@@ -1337,14 +1337,21 @@ async function criarOS({tipo, descricao, local, setorDestino, fotoFile, geo, err
     errEl.style.display = 'block';
     return;
   }
-  try{
-    let fotoUrl = null;
-    if(fotoFile){
+  let fotoUrl = null;
+  if(fotoFile && storage){
+    try{
       const caminho = `chamados/${setorDestino || currentUserDoc.setor}/${Date.now()}_${fotoFile.name}`;
       const ref = storage.ref().child(caminho);
       await ref.put(fotoFile);
       fotoUrl = await ref.getDownloadURL();
+    }catch(e){
+      showToast('Envio de foto indisponível no momento — o chamado vai ser criado sem a foto.', true);
+      fotoUrl = null;
     }
+  } else if(fotoFile && !storage){
+    showToast('Envio de foto ainda não está ativado — o chamado foi criado sem a foto.', true);
+  }
+  try{
     await db.collection('ordens_servico').add({
       setor: setorDestino || currentUserDoc.setor,
       tipo, descricao,
