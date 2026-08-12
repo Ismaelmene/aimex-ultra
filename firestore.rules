@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function logado() { return request.auth != null; }
+    function meuDoc() { return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data; }
+    function souProprietario() { return logado() && meuDoc().role == 'proprietario'; }
+    function souLider() { return logado() && meuDoc().role == 'lider'; }
+
+    match /usuarios/{uid} {
+      allow read: if logado();
+      // Criação de usuário sempre passa pela função serverless (Admin SDK),
+      // então o client nunca escreve direto aqui.
+      allow create: if false;
+      allow update: if souProprietario() || request.auth.uid == uid;
+      allow delete: if souProprietario();
+    }
+
+    match /{document=**} {
+      allow read, write: if false; // demais coleções: liberar por módulo conforme forem construídos
+    }
+  }
+}
