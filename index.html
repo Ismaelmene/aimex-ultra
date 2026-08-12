@@ -311,6 +311,28 @@
   .orcamento-edit input{ margin-bottom:0; }
   .orcamento-edit button{ width:auto; padding:10px 16px; flex-shrink:0; }
 
+  /* ---------- Chamados: foto e localização ---------- */
+  .os-card .os-foto{
+    width:100%; max-width:220px; border-radius:8px; margin:8px 0;
+    display:block; border:1px solid var(--border);
+  }
+  .file-input-wrap{ margin-bottom:16px; }
+  .file-input-wrap input[type=file]{
+    width:100%; background:var(--surface-2); border:1px solid var(--border);
+    border-radius:9px; padding:10px 12px; color:var(--text-dim); font-size:13px;
+  }
+  .loc-btn{
+    background:transparent; border:1px solid var(--border); color:var(--text-dim);
+    padding:10px; font-size:12.5px; margin-bottom:16px;
+  }
+  .loc-btn.ok{ color:var(--pasture); border-color:rgba(124,168,107,0.35); }
+  .loc-link{ color:var(--soil); text-decoration:none; }
+  .alto-valor-tag{
+    display:inline-block; background:rgba(193,80,59,0.15); color:#E8A99A;
+    font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em;
+    padding:2px 8px; border-radius:20px; margin-left:8px;
+  }
+
   #toast{
     position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
     background:var(--surface-2); border:1px solid var(--border);
@@ -406,13 +428,14 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 <script src="firebase-config.js"></script>
 
 <script>
 const OWNER_EMAIL = 'menezesapptec@gmail.com';
 const SETORES = {
   veterinario: 'Veterinário',
-  estrutural: 'Estrutural',
+  estrutural: 'Equipe de Campo',
   maquinario: 'Máquinas',
   nutricional: 'Nutricional / Trato',
   financeiro: 'Financeiro',
@@ -420,6 +443,7 @@ const SETORES = {
   estoque: 'Estoque / Almoxarifado'
 };
 const SETORES_CENTRO_CUSTO = Object.fromEntries(Object.entries(SETORES).filter(([k]) => k !== 'estoque'));
+const SETORES_DESTINO_CHAMADO = ['estrutural', 'veterinario', 'nutricional'];
 const CATEGORIAS_ESTOQUE = {
   almoxarifado: 'Almoxarifado',
   combustivel: 'Combustível',
@@ -430,6 +454,7 @@ const UNIDADES = ['kg','litro','unidade','saca'];
 const STATUS_OS_LABEL = { aberto: 'Aberto', aceito: 'Em atendimento', resolvido: 'Resolvido' };
 const STATUS_SOLIC_LABEL = { pendente: 'Pendente', aprovado: 'Aprovado — retirar', negado: 'Negado', retirado: 'Retirado' };
 const PIE_PALETTE = ['#C98A3E','#7CA86B','#8FB8E8','#C1503B','#B98BD1','#E0C36B','#5FA8A0','#D98CB3'];
+const VALOR_ALTO_MINIMO = 1000;
 
 let currentUser = null;
 let currentUserDoc = null;
@@ -556,6 +581,12 @@ async function renderProprietario(){
     </div>
 
     <div class="panel">
+      <h2>Máquinas — gasto e histórico</h2>
+      <div id="pie-gasto-maquina" style="margin-bottom:20px;"><div class="empty-state">Carregando...</div></div>
+      <div id="tabela-gasto-maquina"><div class="empty-state">Carregando...</div></div>
+    </div>
+
+    <div class="panel">
       <h2>Centros de custo — orçamento mensal por setor</h2>
       <div id="lista-orcamentos"><div class="empty-state">Carregando...</div></div>
     </div>
@@ -640,10 +671,17 @@ async function renderProprietario(){
     let hoje = 0, mes = 0;
     const porCentro = {};
     const porCategoria = {};
+    const porMaquina = {};
+    const pecasPorMaquina = {};
     qs.forEach(doc => {
       const m = doc.data();
       if(!m.timestamp) return;
       const valor = m.valor_total || 0;
+      if(m.maquina_id){
+        porMaquina[m.maquina_id] = (porMaquina[m.maquina_id] || 0) + valor;
+        pecasPorMaquina[m.maquina_id] = (pecasPorMaquina[m.maquina_id] || { nome: m.maquina_nome, qtd: 0 });
+        pecasPorMaquina[m.maquina_id].qtd += 1;
+      }
       if(m.timestamp.toMillis() >= inicioMesTS.toMillis()){
         mes += valor;
         if(m.centro_custo) porCentro[m.centro_custo] = (porCentro[m.centro_custo] || 0) + valor;
@@ -664,6 +702,24 @@ async function renderProprietario(){
     renderPieChart('pie-gasto-categoria', Object.entries(porCategoria).map(([cat, valor], i) => ({
       label: cat, value: valor, color: PIE_PALETTE[i % PIE_PALETTE.length]
     })), (v) => 'R$ ' + v.toLocaleString('pt-BR', {minimumFractionDigits:2}));
+
+    renderPieChart('pie-gasto-maquina', Object.entries(porMaquina).map(([mid, valor], i) => ({
+      label: (pecasPorMaquina[mid] && pecasPorMaquina[mid].nome) || 'Máquina', value: valor, color: PIE_PALETTE[i % PIE_PALETTE.length]
+    })), (v) => 'R$ ' + v.toLocaleString('pt-BR', {minimumFractionDigits:2}));
+
+    const tabelaEl = document.getElementById('tabela-gasto-maquina');
+    const entradas = Object.entries(porMaquina);
+    if(entradas.length === 0){
+      tabelaEl.innerHTML = '<div class="empty-state">Nenhuma peça lançada em máquina ainda.</div>';
+    } else {
+      tabelaEl.innerHTML = `<table><thead><tr><th>Máquina</th><th>Peças trocadas</th><th>Gasto total</th></tr></thead><tbody>
+        ${entradas.sort((a,b) => b[1]-a[1]).map(([mid, valor]) => `<tr>
+          <td>${(pecasPorMaquina[mid] && pecasPorMaquina[mid].nome) || 'Máquina'}</td>
+          <td class="mono">${pecasPorMaquina[mid] ? pecasPorMaquina[mid].qtd : 0}</td>
+          <td class="mono">R$ ${valor.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+        </tr>`).join('')}
+      </tbody></table>`;
+    }
 
     gastoCentroCache = porCentro;
     renderOrcamentos(porCentro);
@@ -834,6 +890,8 @@ async function renderLiderEstoquista(){
 async function renderLiderPadrao(){
   const main = document.getElementById('main-content');
   const setorNome = SETORES[currentUserDoc.setor] || currentUserDoc.setor;
+  const ehMaquinario = currentUserDoc.setor === 'maquinario';
+  const ehCampo = currentUserDoc.setor === 'estrutural';
   main.innerHTML = `
     <div class="section-title">Painel do Líder — ${setorNome}</div>
     <div class="section-sub">Abra ordens de serviço, solicite produtos ao estoque e acompanhe a equipe.</div>
@@ -856,16 +914,28 @@ async function renderLiderPadrao(){
     </div>
 
     <div class="panel">
-      <h2>Solicitar produto ou peça</h2>
-      <div class="error-msg" id="cad-solic-error"></div>
-      <label>Item</label>
-      <select id="solic-item"><option value="">Carregando estoque...</option></select>
-      <label>Quantidade</label>
-      <input id="solic-qtd" type="number" step="0.01" placeholder="0">
-      <label>Motivo (opcional)</label>
-      <input id="solic-motivo" placeholder="Pra que vai usar">
-      <button id="btn-cad-solic">Enviar solicitação ao estoque</button>
+      <h2>Aprovações de alto valor</h2>
+      <div class="section-sub" style="margin-bottom:16px;">Solicitações acima de R$ ${VALOR_ALTO_MINIMO} do seu setor precisam da sua aprovação além da do estoquista.</div>
+      <div id="lista-solic-alto-valor"><div class="empty-state">Carregando...</div></div>
     </div>
+
+    ${ehMaquinario ? `
+    <div class="panel">
+      <h2>Cadastrar máquina</h2>
+      <div class="error-msg" id="cad-maquina-error"></div>
+      <div class="row">
+        <div><label>Nome da máquina</label><input id="maquina-nome" placeholder="Ex: Trator Massey 4x2"></div>
+        <div><label>Identificador (placa/número)</label><input id="maquina-id" placeholder="Ex: ABC-1234"></div>
+      </div>
+      <button id="btn-cad-maquina">Cadastrar máquina</button>
+    </div>
+
+    <div class="panel">
+      <h2>Máquinas da fazenda</h2>
+      <div id="lista-maquinas"><div class="empty-state">Carregando...</div></div>
+    </div>` : ''}
+
+    ${htmlPainelSolicitarProduto()}
 
     <div class="panel">
       <h2>Minhas solicitações</h2>
@@ -884,6 +954,7 @@ async function renderLiderPadrao(){
         <div><label>Senha provisória</label><input id="func-senha" type="text" placeholder="mínimo 6 caracteres"></div>
       </div>
       <button id="btn-cad-func">Cadastrar funcionário</button>
+      ${ehCampo ? '<small class="field-hint" style="margin-top:10px;">Essa equipe é a de campo (vaqueiros) — eles vão poder enviar chamados pra você, pro veterinário e pro nutricional.</small>' : ''}
     </div>
 
     <div class="panel">
@@ -914,6 +985,7 @@ async function renderLiderPadrao(){
     tipo: document.getElementById('os-tipo').value.trim(),
     descricao: document.getElementById('os-descricao').value.trim(),
     local: document.getElementById('os-local').value.trim(),
+    setorDestino: currentUserDoc.setor,
     errorElId: 'cad-os-error',
     onSuccess: () => {
       document.getElementById('os-tipo').value = '';
@@ -925,39 +997,185 @@ async function renderLiderPadrao(){
   db.collection('ordens_servico').where('setor', '==', currentUserDoc.setor)
     .onSnapshot((qs) => renderListaOS(qs, 'lista-os-lider', false));
 
+  db.collection('solicitacoes_estoque')
+    .where('centro_custo', '==', currentUserDoc.setor)
+    .where('requer_dupla_aprovacao', '==', true)
+    .onSnapshot((qs) => renderListaSolicitacoes(qs, 'lista-solic-alto-valor', { liderSetor: true }));
+
+  if(ehMaquinario){
+    document.getElementById('btn-cad-maquina').addEventListener('click', () => cadastrarMaquina({
+      nome: document.getElementById('maquina-nome').value.trim(),
+      identificador: document.getElementById('maquina-id').value.trim(),
+      errorElId: 'cad-maquina-error',
+      onSuccess: () => {
+        document.getElementById('maquina-nome').value = '';
+        document.getElementById('maquina-id').value = '';
+      }
+    }));
+    db.collection('maquinas').orderBy('nome').onSnapshot((qs) => renderListaMaquinas(qs, 'lista-maquinas'));
+  }
+
+  attachSolicitarProdutoHandlers();
+
+  db.collection('solicitacoes_estoque').where('solicitante_id', '==', currentUser.uid)
+    .onSnapshot((qs) => renderListaSolicitacoes(qs, 'lista-minhas-solic', { retirar: true }));
+}
+
+// ---------- FORMULÁRIO COMPARTILHADO: SOLICITAR PRODUTO ----------
+function htmlPainelSolicitarProduto(){
+  return `
+    <div class="panel">
+      <h2>Solicitar produto ou peça</h2>
+      <div class="error-msg" id="cad-solic-error"></div>
+      <label>Item</label>
+      <select id="solic-item"><option value="">Carregando estoque...</option></select>
+      <label>Quantidade</label>
+      <input id="solic-qtd" type="number" step="0.01" placeholder="0">
+      <div id="solic-maquina-wrap" style="display:none;">
+        <label>Máquina (onde a peça vai ser aplicada)</label>
+        <select id="solic-maquina"><option value="">Selecione a máquina</option></select>
+      </div>
+      <label>Motivo / aplicação (opcional)</label>
+      <input id="solic-motivo" placeholder="Pra que vai usar">
+      <button id="btn-cad-solic">Enviar solicitação ao estoque</button>
+      <small class="field-hint" style="margin-top:10px;">Itens acima de R$ ${VALOR_ALTO_MINIMO} precisam da aprovação do estoquista e do seu líder.</small>
+    </div>`;
+}
+
+function toggleMaquinaField(){
+  const sel = document.getElementById('solic-item');
+  const wrap = document.getElementById('solic-maquina-wrap');
+  if(!sel || !wrap) return;
+  const item = estoqueCache.find(i => i.id === sel.value);
+  wrap.style.display = (item && item.categoria === 'peca_maquinario') ? 'block' : 'none';
+}
+
+function attachSolicitarProdutoHandlers(){
   db.collection('estoque').orderBy('nome').onSnapshot((qs) => {
     estoqueCache = [];
     qs.forEach(doc => estoqueCache.push({ id: doc.id, ...doc.data() }));
     const sel = document.getElementById('solic-item');
-    if(sel) sel.innerHTML = estoqueCache.map(i => `<option value="${i.id}">${i.nome} (${i.quantidade_atual} ${i.unidade} disp.)</option>`).join('') || '<option value="">Nenhum item cadastrado</option>';
+    if(sel){
+      sel.innerHTML = estoqueCache.map(i => `<option value="${i.id}">${i.nome} (${i.quantidade_atual} ${i.unidade} disp.)</option>`).join('') || '<option value="">Nenhum item cadastrado</option>';
+      toggleMaquinaField();
+    }
   });
 
-  document.getElementById('btn-cad-solic').addEventListener('click', () => criarSolicitacao({
-    itemId: document.getElementById('solic-item').value,
-    quantidade: document.getElementById('solic-qtd').value,
-    motivo: document.getElementById('solic-motivo').value.trim(),
-    errorElId: 'cad-solic-error',
-    onSuccess: () => {
-      document.getElementById('solic-qtd').value = '';
-      document.getElementById('solic-motivo').value = '';
+  db.collection('maquinas').orderBy('nome').onSnapshot((qs) => {
+    maquinasCache = [];
+    qs.forEach(doc => maquinasCache.push({ id: doc.id, ...doc.data() }));
+    const selM = document.getElementById('solic-maquina');
+    if(selM){
+      selM.innerHTML = '<option value="">Selecione a máquina</option>' +
+        maquinasCache.map(m => `<option value="${m.id}">${m.nome}${m.identificador ? ' — ' + m.identificador : ''}</option>`).join('');
     }
-  }));
+  });
 
-  db.collection('solicitacoes_estoque').where('solicitante_id', '==', currentUser.uid)
-    .onSnapshot((qs) => renderListaSolicitacoes(qs, 'lista-minhas-solic', { retirar: true }));
+  const selItem = document.getElementById('solic-item');
+  if(selItem) selItem.addEventListener('change', toggleMaquinaField);
+
+  document.getElementById('btn-cad-solic').addEventListener('click', () => {
+    const itemId = document.getElementById('solic-item').value;
+    const item = estoqueCache.find(i => i.id === itemId);
+    const maquinaSel = document.getElementById('solic-maquina');
+    const errEl = document.getElementById('cad-solic-error');
+    let maquinaId = null, maquinaNome = null;
+    if(item && item.categoria === 'peca_maquinario'){
+      if(!maquinaSel || !maquinaSel.value){
+        errEl.textContent = 'Selecione a máquina onde a peça vai ser aplicada.';
+        errEl.style.display = 'block';
+        return;
+      }
+      maquinaId = maquinaSel.value;
+      const m = maquinasCache.find(mm => mm.id === maquinaId);
+      maquinaNome = m ? m.nome : null;
+    }
+    criarSolicitacao({
+      itemId,
+      quantidade: document.getElementById('solic-qtd').value,
+      motivo: document.getElementById('solic-motivo').value.trim(),
+      maquinaId, maquinaNome,
+      errorElId: 'cad-solic-error',
+      onSuccess: () => {
+        document.getElementById('solic-qtd').value = '';
+        document.getElementById('solic-motivo').value = '';
+        if(maquinaSel) maquinaSel.value = '';
+      }
+    });
+  });
+}
+
+// ---------- MÁQUINAS ----------
+async function cadastrarMaquina({nome, identificador, errorElId, onSuccess}){
+  const errEl = document.getElementById(errorElId);
+  errEl.style.display = 'none';
+  if(!nome){
+    errEl.textContent = 'Informe o nome da máquina.';
+    errEl.style.display = 'block';
+    return;
+  }
+  try{
+    await db.collection('maquinas').add({
+      nome, identificador: identificador || '',
+      status: 'ativa',
+      criado_em: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    showToast('Máquina cadastrada.');
+    if(onSuccess) onSuccess();
+  }catch(e){
+    errEl.textContent = 'Erro ao cadastrar máquina.';
+    errEl.style.display = 'block';
+  }
+}
+
+function renderListaMaquinas(qs, containerId){
+  const el = document.getElementById(containerId);
+  if(!el) return;
+  if(qs.empty){
+    el.innerHTML = '<div class="empty-state">Nenhuma máquina cadastrada ainda.</div>';
+    return;
+  }
+  let rows = '';
+  qs.forEach(doc => {
+    const m = doc.data();
+    rows += `<tr><td>${m.nome}</td><td class="mono" style="color:var(--text-dim);">${m.identificador || '—'}</td></tr>`;
+  });
+  el.innerHTML = `<table><thead><tr><th>Nome</th><th>Identificador</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 // ---------- PAINEL FUNCIONÁRIO ----------
 let estoqueCache = [];
 let orcamentosCache = {};
 let gastoCentroCache = {};
+let maquinasCache = [];
 
 function renderFuncionario(){
   const main = document.getElementById('main-content');
   const setorNome = SETORES[currentUserDoc.setor] || currentUserDoc.setor;
+  const ehCampo = currentUserDoc.setor === 'estrutural';
   main.innerHTML = `
     <div class="section-title">Painel — ${setorNome}</div>
-    <div class="section-sub">Aceite ordens de serviço, registre o material usado e conclua.</div>
+    <div class="section-sub">Abra chamados, aceite ordens de serviço e registre o material usado.</div>
+
+    <div class="panel">
+      <h2>Abrir chamado</h2>
+      <div class="error-msg" id="cad-os-error"></div>
+      ${ehCampo ? `
+        <label>Enviar para</label>
+        <select id="os-destino">
+          ${SETORES_DESTINO_CHAMADO.map(s => `<option value="${s}">${SETORES[s]}</option>`).join('')}
+        </select>` : ''}
+      <label>Tipo do problema</label>
+      <input id="os-tipo" placeholder="Ex: cerca danificada, animal doente, poço seco">
+      <label>Descrição</label>
+      <input id="os-descricao" placeholder="Detalhes do que está acontecendo">
+      <label>Localização (opcional)</label>
+      <input id="os-local" placeholder="Ex: Curral 4, Pasto Norte">
+      <button type="button" class="loc-btn" id="btn-usar-local">📍 Usar minha localização atual</button>
+      <label>Foto (opcional)</label>
+      <div class="file-input-wrap"><input type="file" id="os-foto" accept="image/*" capture="environment"></div>
+      <button id="btn-cad-os">Enviar chamado</button>
+    </div>
 
     <div class="panel">
       <h2>Ordens abertas no setor</h2>
@@ -969,17 +1187,7 @@ function renderFuncionario(){
       <div id="lista-os-minhas"><div class="empty-state">Carregando...</div></div>
     </div>
 
-    <div class="panel">
-      <h2>Solicitar produto ou peça</h2>
-      <div class="error-msg" id="cad-solic-error"></div>
-      <label>Item</label>
-      <select id="solic-item"><option value="">Carregando estoque...</option></select>
-      <label>Quantidade</label>
-      <input id="solic-qtd" type="number" step="0.01" placeholder="0">
-      <label>Motivo (opcional)</label>
-      <input id="solic-motivo" placeholder="Pra que vai usar">
-      <button id="btn-cad-solic">Enviar solicitação ao estoque</button>
-    </div>
+    ${htmlPainelSolicitarProduto()}
 
     <div class="panel">
       <h2>Minhas solicitações</h2>
@@ -987,11 +1195,46 @@ function renderFuncionario(){
     </div>
   `;
 
-  db.collection('estoque').orderBy('nome').onSnapshot((qs) => {
-    estoqueCache = [];
-    qs.forEach(doc => estoqueCache.push({ id: doc.id, ...doc.data() }));
-    const sel = document.getElementById('solic-item');
-    if(sel) sel.innerHTML = estoqueCache.map(i => `<option value="${i.id}">${i.nome} (${i.quantidade_atual} ${i.unidade} disp.)</option>`).join('') || '<option value="">Nenhum item cadastrado</option>';
+  let geoCapturado = null;
+  const btnLoc = document.getElementById('btn-usar-local');
+  if(btnLoc){
+    btnLoc.addEventListener('click', () => {
+      if(!navigator.geolocation){
+        showToast('Localização não suportada neste dispositivo.', true);
+        return;
+      }
+      btnLoc.textContent = '📍 Obtendo localização...';
+      navigator.geolocation.getCurrentPosition((pos) => {
+        geoCapturado = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        btnLoc.textContent = '📍 Localização capturada';
+        btnLoc.classList.add('ok');
+      }, () => {
+        btnLoc.textContent = '📍 Usar minha localização atual';
+        showToast('Não foi possível obter a localização.', true);
+      });
+    });
+  }
+
+  document.getElementById('btn-cad-os').addEventListener('click', () => {
+    const destinoSel = document.getElementById('os-destino');
+    const fotoInput = document.getElementById('os-foto');
+    criarOS({
+      tipo: document.getElementById('os-tipo').value.trim(),
+      descricao: document.getElementById('os-descricao').value.trim(),
+      local: document.getElementById('os-local').value.trim(),
+      setorDestino: destinoSel ? destinoSel.value : currentUserDoc.setor,
+      fotoFile: fotoInput && fotoInput.files[0] ? fotoInput.files[0] : null,
+      geo: geoCapturado,
+      errorElId: 'cad-os-error',
+      onSuccess: () => {
+        document.getElementById('os-tipo').value = '';
+        document.getElementById('os-descricao').value = '';
+        document.getElementById('os-local').value = '';
+        if(fotoInput) fotoInput.value = '';
+        geoCapturado = null;
+        if(btnLoc){ btnLoc.textContent = '📍 Usar minha localização atual'; btnLoc.classList.remove('ok'); }
+      }
+    });
   });
 
   db.collection('ordens_servico')
@@ -1008,16 +1251,7 @@ function renderFuncionario(){
       renderListaOS(qs, 'lista-os-minhas', true);
     });
 
-  document.getElementById('btn-cad-solic').addEventListener('click', () => criarSolicitacao({
-    itemId: document.getElementById('solic-item').value,
-    quantidade: document.getElementById('solic-qtd').value,
-    motivo: document.getElementById('solic-motivo').value.trim(),
-    errorElId: 'cad-solic-error',
-    onSuccess: () => {
-      document.getElementById('solic-qtd').value = '';
-      document.getElementById('solic-motivo').value = '';
-    }
-  }));
+  attachSolicitarProdutoHandlers();
 
   db.collection('solicitacoes_estoque').where('solicitante_id', '==', currentUser.uid)
     .onSnapshot((qs) => renderListaSolicitacoes(qs, 'lista-minhas-solic', { retirar: true }));
@@ -1061,14 +1295,16 @@ function renderListaOS(qs, containerId, interativo){
   qs.forEach(doc => {
     const os = doc.data();
     const id = doc.id;
+    const mapaLink = os.geo ? `<a class="loc-link" href="https://maps.google.com/?q=${os.geo.lat},${os.geo.lng}" target="_blank">📍 ver no mapa</a>` : '';
     html += `
       <div class="os-card">
         <div class="os-top">
-          <div class="os-tipo">${os.tipo || 'Serviço'}</div>
+          <div class="os-tipo">${os.tipo || 'Serviço'}${os.setor ? ' <span class="setor-tag">· ' + (SETORES[os.setor] || os.setor) + '</span>' : ''}</div>
           <span class="badge ${os.status}">${STATUS_OS_LABEL[os.status] || os.status}</span>
         </div>
         <div class="os-desc">${os.descricao || ''}</div>
-        <div class="os-meta">${os.localizacao_texto ? '📍 ' + os.localizacao_texto + ' · ' : ''}${os.aceito_por_nome ? 'Equipe: ' + os.aceito_por_nome : 'Aguardando equipe'}${os.custo_total ? ' · R$ ' + os.custo_total.toFixed(2) : ''}</div>
+        ${os.foto_url ? `<img class="os-foto" src="${os.foto_url}" alt="Foto do chamado">` : ''}
+        <div class="os-meta">${os.localizacao_texto ? '📍 ' + os.localizacao_texto + ' · ' : ''}${mapaLink ? mapaLink + ' · ' : ''}${os.aceito_por_nome ? 'Equipe: ' + os.aceito_por_nome : 'Aguardando equipe'}${os.custo_total ? ' · R$ ' + os.custo_total.toFixed(2) : ''}</div>
         ${interativo && os.status === 'aberto' ? `<div class="os-actions"><button onclick="aceitarOS('${id}')">Aceitar</button></div>` : ''}
         ${interativo && os.status === 'aceito' && os.aceito_por === currentUser.uid ? renderFormItensUsados(id, os) : ''}
       </div>`;
@@ -1093,7 +1329,7 @@ function renderFormItensUsados(osId, os){
     </div>`;
 }
 
-async function criarOS({tipo, descricao, local, errorElId, onSuccess}){
+async function criarOS({tipo, descricao, local, setorDestino, fotoFile, geo, errorElId, onSuccess}){
   const errEl = document.getElementById(errorElId);
   errEl.style.display = 'none';
   if(!tipo || !descricao){
@@ -1102,10 +1338,19 @@ async function criarOS({tipo, descricao, local, errorElId, onSuccess}){
     return;
   }
   try{
+    let fotoUrl = null;
+    if(fotoFile){
+      const caminho = `chamados/${setorDestino || currentUserDoc.setor}/${Date.now()}_${fotoFile.name}`;
+      const ref = storage.ref().child(caminho);
+      await ref.put(fotoFile);
+      fotoUrl = await ref.getDownloadURL();
+    }
     await db.collection('ordens_servico').add({
-      setor: currentUserDoc.setor,
+      setor: setorDestino || currentUserDoc.setor,
       tipo, descricao,
       localizacao_texto: local || '',
+      geo: geo || null,
+      foto_url: fotoUrl,
       origem: 'manual',
       status: 'aberto',
       aberto_por: currentUser.uid,
@@ -1115,7 +1360,7 @@ async function criarOS({tipo, descricao, local, errorElId, onSuccess}){
       itens_usados: [], custo_total: 0,
       resolvido_em: null
     });
-    showToast('Ordem de serviço aberta.');
+    showToast('Chamado enviado.');
     if(onSuccess) onSuccess();
   }catch(e){
     errEl.textContent = 'Erro ao abrir ordem de serviço.';
@@ -1364,7 +1609,7 @@ window.darEntradaEstoque = async function(itemId){
 };
 
 // ---------- SOLICITAÇÕES DE PRODUTO ----------
-async function criarSolicitacao({itemId, quantidade, motivo, errorElId, onSuccess}){
+async function criarSolicitacao({itemId, quantidade, motivo, maquinaId, maquinaNome, errorElId, onSuccess}){
   const errEl = document.getElementById(errorElId);
   errEl.style.display = 'none';
   const qtd = parseFloat(quantidade);
@@ -1379,6 +1624,8 @@ async function criarSolicitacao({itemId, quantidade, motivo, errorElId, onSucces
     errEl.style.display = 'block';
     return;
   }
+  const valorEstimado = qtd * (item.custo_unitario_medio || 0);
+  const requerDupla = valorEstimado >= VALOR_ALTO_MINIMO;
   try{
     await db.collection('solicitacoes_estoque').add({
       item_id: itemId,
@@ -1386,22 +1633,35 @@ async function criarSolicitacao({itemId, quantidade, motivo, errorElId, onSucces
       unidade: item.unidade,
       quantidade_solicitada: qtd,
       custo_unitario: item.custo_unitario_medio || 0,
-      valor_estimado: qtd * (item.custo_unitario_medio || 0),
+      valor_estimado: valorEstimado,
+      maquina_id: maquinaId || null,
+      maquina_nome: maquinaNome || null,
       solicitante_id: currentUser.uid,
       solicitante_nome: currentUserDoc.nome,
       centro_custo: currentUserDoc.setor,
       motivo: motivo || '',
       status: 'pendente',
+      requer_dupla_aprovacao: requerDupla,
       criado_em: firebase.firestore.FieldValue.serverTimestamp(),
       aprovado_por: null, aprovado_por_nome: null, aprovado_em: null,
+      aprovado_lider_por: null, aprovado_lider_nome: null, aprovado_lider_em: null,
       retirado_por: null, retirado_por_nome: null, retirado_em: null
     });
-    showToast('Solicitação enviada ao estoque.');
+    showToast(requerDupla ? 'Solicitação enviada — precisa de dupla aprovação por ser de alto valor.' : 'Solicitação enviada ao estoque.');
     if(onSuccess) onSuccess();
   }catch(e){
     errEl.textContent = 'Erro ao enviar solicitação.';
     errEl.style.display = 'block';
   }
+}
+
+function statusSolicLabel(s){
+  if(s.status === 'pendente' && s.requer_dupla_aprovacao){
+    if(s.aprovado_por && !s.aprovado_lider_por) return 'Aguardando líder';
+    if(!s.aprovado_por && s.aprovado_lider_por) return 'Aguardando estoque';
+    return 'Aguardando aprovação (2)';
+  }
+  return STATUS_SOLIC_LABEL[s.status] || s.status;
 }
 
 function renderListaSolicitacoes(qs, containerId, opts){
@@ -1416,17 +1676,27 @@ function renderListaSolicitacoes(qs, containerId, opts){
   qs.forEach(doc => {
     const s = doc.data();
     const id = doc.id;
+    const aplicacao = s.maquina_nome ? ` · aplicação: ${s.maquina_nome}` : '';
+    const aprovacoes = [
+      s.aprovado_por_nome ? 'estoque: ' + s.aprovado_por_nome : null,
+      s.aprovado_lider_nome ? 'líder: ' + s.aprovado_lider_nome : null
+    ].filter(Boolean).join(' · ');
     html += `
       <div class="os-card">
         <div class="os-top">
-          <div class="os-tipo">${s.quantidade_solicitada} ${s.unidade} — ${s.item_nome}</div>
-          <span class="badge ${s.status}">${STATUS_SOLIC_LABEL[s.status] || s.status}</span>
+          <div class="os-tipo">${s.quantidade_solicitada} ${s.unidade} — ${s.item_nome}${s.requer_dupla_aprovacao ? '<span class="alto-valor-tag">Alto valor</span>' : ''}</div>
+          <span class="badge ${s.status}">${statusSolicLabel(s)}</span>
         </div>
-        <div class="os-desc">${s.motivo || ''}</div>
-        <div class="os-meta">${s.solicitante_nome} · ${SETORES[s.centro_custo] || s.centro_custo}${s.aprovado_por_nome ? ' · aprovado por ' + s.aprovado_por_nome : ''}</div>
-        ${opts.estoquista && s.status === 'pendente' ? `
+        <div class="os-desc">${s.motivo || ''}${aplicacao}</div>
+        <div class="os-meta">${s.solicitante_nome} · ${SETORES[s.centro_custo] || s.centro_custo}${aprovacoes ? ' · ' + aprovacoes : ''}${s.valor_estimado ? ' · R$ ' + s.valor_estimado.toFixed(2) : ''}</div>
+        ${opts.estoquista && s.status === 'pendente' && !s.aprovado_por ? `
           <div class="os-actions">
-            <button onclick="aprovarSolicitacao('${id}')">Aprovar</button>
+            <button onclick="aprovarSolicitacaoEstoque('${id}')">Aprovar (estoque)</button>
+            <button class="secondary" onclick="negarSolicitacao('${id}')">Negar</button>
+          </div>` : ''}
+        ${opts.liderSetor && s.status === 'pendente' && !s.aprovado_lider_por ? `
+          <div class="os-actions">
+            <button onclick="aprovarSolicitacaoLider('${id}')">Aprovar (líder)</button>
             <button class="secondary" onclick="negarSolicitacao('${id}')">Negar</button>
           </div>` : ''}
         ${opts.retirar && s.status === 'aprovado' && s.solicitante_id === currentUser.uid ? `
@@ -1438,15 +1708,45 @@ function renderListaSolicitacoes(qs, containerId, opts){
   el.innerHTML = html;
 }
 
-window.aprovarSolicitacao = async function(id){
+window.aprovarSolicitacaoEstoque = async function(id){
   try{
-    await db.collection('solicitacoes_estoque').doc(id).update({
-      status: 'aprovado',
-      aprovado_por: currentUser.uid,
-      aprovado_por_nome: currentUserDoc.nome,
-      aprovado_em: firebase.firestore.FieldValue.serverTimestamp()
+    const ref = db.collection('solicitacoes_estoque').doc(id);
+    await db.runTransaction(async (t) => {
+      const snap = await t.get(ref);
+      const s = snap.data();
+      const dados = {
+        aprovado_por: currentUser.uid,
+        aprovado_por_nome: currentUserDoc.nome,
+        aprovado_em: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      if(!s.requer_dupla_aprovacao || s.aprovado_lider_por){
+        dados.status = 'aprovado';
+      }
+      t.update(ref, dados);
     });
-    showToast('Solicitação aprovada.');
+    showToast('Aprovado pelo estoque.');
+  }catch(e){
+    showToast('Erro ao aprovar.', true);
+  }
+};
+
+window.aprovarSolicitacaoLider = async function(id){
+  try{
+    const ref = db.collection('solicitacoes_estoque').doc(id);
+    await db.runTransaction(async (t) => {
+      const snap = await t.get(ref);
+      const s = snap.data();
+      const dados = {
+        aprovado_lider_por: currentUser.uid,
+        aprovado_lider_nome: currentUserDoc.nome,
+        aprovado_lider_em: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      if(s.aprovado_por){
+        dados.status = 'aprovado';
+      }
+      t.update(ref, dados);
+    });
+    showToast('Aprovado pelo líder.');
   }catch(e){
     showToast('Erro ao aprovar.', true);
   }
@@ -1469,7 +1769,7 @@ window.negarSolicitacao = async function(id){
 window.retirarProduto = async function(id){
   try{
     const solicRef = db.collection('solicitacoes_estoque').doc(id);
-    await db.runTransaction(async (t) => {
+    const solicFinal = await db.runTransaction(async (t) => {
       const solicSnap = await t.get(solicRef);
       const s = solicSnap.data();
       if(s.status !== 'aprovado') throw new Error('Esta solicitação não está mais disponível para retirada.');
@@ -1489,16 +1789,66 @@ window.retirarProduto = async function(id){
         item_id: s.item_id, item_nome: s.item_nome, tipo: 'saida', quantidade: s.quantidade_solicitada,
         valor_unitario: s.custo_unitario || 0, valor_total: s.valor_estimado || 0,
         origem: 'solicitacao', os_id: null, solicitacao_id: id, centro_custo: s.centro_custo,
+        maquina_id: s.maquina_id || null, maquina_nome: s.maquina_nome || null,
         responsavel_id: currentUser.uid, responsavel_nome: currentUserDoc.nome,
         liberado_por_nome: s.aprovado_por_nome || null,
         timestamp: firebase.firestore.FieldValue.serverTimestamp()
       });
+      return { ...s, retirado_por_nome: currentUserDoc.nome, retirado_em_local: new Date() };
     });
     showToast('Produto retirado do estoque.');
+    if(solicFinal.requer_dupla_aprovacao){
+      abrirRecibo(solicFinal);
+    }
   }catch(e){
     showToast(e.message || 'Erro ao retirar produto.', true);
   }
 };
+
+function abrirRecibo(s){
+  const janela = window.open('', '_blank', 'width=640,height=760');
+  if(!janela) return;
+  const dataStr = s.retirado_em_local.toLocaleString('pt-BR');
+  janela.document.write(`
+    <html><head><title>Comprovante de retirada — Aimex</title>
+    <style>
+      body{ font-family: Arial, sans-serif; padding:32px; color:#111; }
+      h1{ font-size:18px; margin-bottom:2px; }
+      .sub{ color:#555; font-size:12px; margin-bottom:24px; }
+      table{ width:100%; border-collapse:collapse; margin-bottom:24px; }
+      td{ padding:8px 0; border-bottom:1px solid #ddd; font-size:13.5px; }
+      td.k{ color:#555; width:180px; }
+      .assinaturas{ margin-top:60px; }
+      .linha-assinatura{ margin-bottom:44px; }
+      .linha-assinatura .traco{ border-bottom:1px solid #111; margin-bottom:6px; height:32px; }
+      .linha-assinatura .nome{ font-size:12.5px; color:#333; }
+      @media print{ button{ display:none; } }
+    </style></head>
+    <body>
+      <h1>Comprovante de Retirada de Estoque</h1>
+      <div class="sub">Item de alto valor — requer as três assinaturas abaixo</div>
+      <table>
+        <tr><td class="k">Item</td><td>${s.item_nome}</td></tr>
+        <tr><td class="k">Quantidade</td><td>${s.quantidade_solicitada} ${s.unidade}</td></tr>
+        <tr><td class="k">Valor</td><td>R$ ${(s.valor_estimado || 0).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td></tr>
+        ${s.maquina_nome ? `<tr><td class="k">Aplicação / máquina</td><td>${s.maquina_nome}</td></tr>` : ''}
+        <tr><td class="k">Centro de custo</td><td>${SETORES[s.centro_custo] || s.centro_custo}</td></tr>
+        <tr><td class="k">Solicitante</td><td>${s.solicitante_nome}</td></tr>
+        <tr><td class="k">Aprovado pelo estoque</td><td>${s.aprovado_por_nome || '—'}</td></tr>
+        <tr><td class="k">Aprovado pelo líder</td><td>${s.aprovado_lider_nome || '—'}</td></tr>
+        <tr><td class="k">Retirado por</td><td>${s.retirado_por_nome}</td></tr>
+        <tr><td class="k">Data/hora</td><td>${dataStr}</td></tr>
+      </table>
+      <div class="assinaturas">
+        <div class="linha-assinatura"><div class="traco"></div><div class="nome">Assinatura do solicitante — ${s.solicitante_nome}</div></div>
+        <div class="linha-assinatura"><div class="traco"></div><div class="nome">Assinatura do líder — ${s.aprovado_lider_nome || ''}</div></div>
+        <div class="linha-assinatura"><div class="traco"></div><div class="nome">Assinatura do estoquista — ${s.aprovado_por_nome || ''}</div></div>
+      </div>
+      <button onclick="window.print()">Imprimir</button>
+    </body></html>
+  `);
+  janela.document.close();
+}
 
 function renderHistoricoRetiradas(qs, containerId){
   const el = document.getElementById(containerId);
