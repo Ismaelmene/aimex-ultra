@@ -226,6 +226,10 @@
   .badge.aberto{ background:rgba(201,138,62,0.18); color:var(--soil); }
   .badge.aceito{ background:rgba(90,140,200,0.18); color:#8FB8E8; }
   .badge.resolvido{ background:rgba(124,168,107,0.15); color:var(--pasture); }
+  .badge.pendente{ background:rgba(201,138,62,0.18); color:var(--soil); }
+  .badge.aprovado{ background:rgba(90,140,200,0.18); color:#8FB8E8; }
+  .badge.negado{ background:rgba(193,80,59,0.15); color:#E8A99A; }
+  .badge.retirado{ background:rgba(124,168,107,0.15); color:var(--pasture); }
   .empty-state{
     text-align:center;
     padding:30px 10px;
@@ -287,6 +291,25 @@
   .itens-usados-list{ font-size:12.5px; color:var(--text-dim); margin-bottom:10px; }
   .itens-usados-list li{ list-style:none; padding:4px 0; border-bottom:1px dashed var(--border); }
   small.field-hint{ display:block; font-size:11.5px; color:var(--text-dim); margin:-10px 0 14px; }
+
+  /* ---------- Gráficos de pizza ---------- */
+  .pie-wrap{ display:flex; align-items:center; gap:28px; flex-wrap:wrap; }
+  .pie-circle{ width:150px; height:150px; border-radius:50%; flex-shrink:0; }
+  .pie-legend{ display:flex; flex-direction:column; gap:9px; flex:1; min-width:180px; }
+  .pie-legend-row{ display:flex; align-items:center; gap:8px; }
+  .pie-dot{ width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+  .pie-label{ flex:1; font-size:12.5px; color:var(--text-dim); }
+  .pie-value{ font-size:12.5px; font-family:'IBM Plex Mono', monospace; }
+
+  /* ---------- Orçamento por centro de custo ---------- */
+  .orcamento-row{ padding:14px 0; border-bottom:1px solid var(--border); }
+  .orcamento-row:last-child{ border-bottom:none; }
+  .orcamento-top{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:13.5px; }
+  .orcamento-top .gasto-atual{ font-family:'IBM Plex Mono', monospace; font-size:12.5px; color:var(--text-dim); }
+  .orcamento-top .gasto-atual.estourou{ color:var(--danger); font-weight:600; }
+  .orcamento-edit{ display:flex; gap:8px; margin-top:8px; }
+  .orcamento-edit input{ margin-bottom:0; }
+  .orcamento-edit button{ width:auto; padding:10px 16px; flex-shrink:0; }
 
   #toast{
     position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
@@ -393,8 +416,10 @@ const SETORES = {
   maquinario: 'Máquinas',
   nutricional: 'Nutricional / Trato',
   financeiro: 'Financeiro',
-  admin: 'Administrativo'
+  admin: 'Administrativo',
+  estoque: 'Estoque / Almoxarifado'
 };
+const SETORES_CENTRO_CUSTO = Object.fromEntries(Object.entries(SETORES).filter(([k]) => k !== 'estoque'));
 const CATEGORIAS_ESTOQUE = {
   almoxarifado: 'Almoxarifado',
   combustivel: 'Combustível',
@@ -403,6 +428,8 @@ const CATEGORIAS_ESTOQUE = {
 };
 const UNIDADES = ['kg','litro','unidade','saca'];
 const STATUS_OS_LABEL = { aberto: 'Aberto', aceito: 'Em atendimento', resolvido: 'Resolvido' };
+const STATUS_SOLIC_LABEL = { pendente: 'Pendente', aprovado: 'Aprovado — retirar', negado: 'Negado', retirado: 'Retirado' };
+const PIE_PALETTE = ['#C98A3E','#7CA86B','#8FB8E8','#C1503B','#B98BD1','#E0C36B','#5FA8A0','#D98CB3'];
 
 let currentUser = null;
 let currentUserDoc = null;
@@ -496,18 +523,41 @@ async function renderProprietario(){
     <div class="section-sub">Visão geral das operações e cadastro de líderes de setor.</div>
 
     <div class="panel">
-      <h2>Visão geral</h2>
+      <h2>Ordens de serviço</h2>
       <div class="stats-grid" id="stats-cards">
-        <div class="stat-card"><div class="num">—</div><div class="label">Ordens abertas</div></div>
+        <div class="stat-card"><div class="num">—</div><div class="label">Abertas</div></div>
         <div class="stat-card"><div class="num">—</div><div class="label">Em atendimento</div></div>
         <div class="stat-card"><div class="num">—</div><div class="label">Resolvidas</div></div>
-        <div class="stat-card"><div class="num">—</div><div class="label">Gasto total (estoque)</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Financeiro — estoque</h2>
+      <div class="stats-grid" id="stats-financeiro">
+        <div class="stat-card"><div class="num">—</div><div class="label">Valor total em estoque</div></div>
+        <div class="stat-card"><div class="num">—</div><div class="label">Saída hoje</div></div>
+        <div class="stat-card"><div class="num">—</div><div class="label">Saída no mês</div></div>
       </div>
     </div>
 
     <div class="panel">
       <h2>Ordens abertas por setor</h2>
-      <div id="bar-chart-setor"><div class="empty-state">Carregando...</div></div>
+      <div id="pie-os-setor"><div class="empty-state">Carregando...</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>Para onde está indo o dinheiro (mês atual)</h2>
+      <div id="pie-gasto-centro"><div class="empty-state">Carregando...</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>Gasto por categoria de produto (mês atual)</h2>
+      <div id="pie-gasto-categoria"><div class="empty-state">Carregando...</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>Centros de custo — orçamento mensal por setor</h2>
+      <div id="lista-orcamentos"><div class="empty-state">Carregando...</div></div>
     </div>
 
     <div class="panel">
@@ -531,6 +581,7 @@ async function renderProprietario(){
         <div><label>Senha provisória</label><input id="lider-senha" type="text" placeholder="mínimo 6 caracteres"></div>
       </div>
       <button id="btn-cad-lider">Cadastrar líder</button>
+      <small class="field-hint" style="margin-top:10px;">Escolha o setor "Estoque / Almoxarifado" pra criar o Estoquista — só esse perfil cadastra produtos.</small>
     </div>
 
     <div class="panel">
@@ -575,79 +626,110 @@ async function renderProprietario(){
     if(cards[1]) cards[1].textContent = aceitas;
     if(cards[2]) cards[2].textContent = resolvidas;
 
-    const maxSetor = Math.max(1, ...Object.values(porSetor));
-    const barsEl = document.getElementById('bar-chart-setor');
-    const entries = Object.entries(porSetor);
-    if(entries.length === 0){
-      barsEl.innerHTML = '<div class="empty-state">Nenhuma ordem em aberto no momento.</div>';
-    } else {
-      barsEl.innerHTML = entries.map(([setor, qtd]) => `
-        <div class="bar-row">
-          <div class="bar-label">${SETORES[setor] || setor}</div>
-          <div class="bar-track"><div class="bar-fill" style="width:${(qtd/maxSetor*100).toFixed(0)}%"></div></div>
-          <div class="bar-num">${qtd}</div>
-        </div>`).join('');
-    }
+    renderPieChart('pie-os-setor', Object.entries(porSetor).map(([setor, qtd], i) => ({
+      label: SETORES[setor] || setor, value: qtd, color: PIE_PALETTE[i % PIE_PALETTE.length]
+    })));
   });
+
+  const inicioMes = new Date(); inicioMes.setDate(1); inicioMes.setHours(0,0,0,0);
+  const inicioHoje = new Date(); inicioHoje.setHours(0,0,0,0);
+  const inicioMesTS = firebase.firestore.Timestamp.fromDate(inicioMes);
+  const inicioHojeTS = firebase.firestore.Timestamp.fromDate(inicioHoje);
 
   db.collection('movimentacoes_estoque').where('tipo','==','saida').onSnapshot((qs) => {
-    let total = 0;
-    qs.forEach(doc => { total += (doc.data().valor_total || 0); });
-    const cards = document.querySelectorAll('#stats-cards .stat-card .num');
-    if(cards[3]) cards[3].textContent = 'R$ ' + total.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    let hoje = 0, mes = 0;
+    const porCentro = {};
+    const porCategoria = {};
+    qs.forEach(doc => {
+      const m = doc.data();
+      if(!m.timestamp) return;
+      const valor = m.valor_total || 0;
+      if(m.timestamp.toMillis() >= inicioMesTS.toMillis()){
+        mes += valor;
+        if(m.centro_custo) porCentro[m.centro_custo] = (porCentro[m.centro_custo] || 0) + valor;
+        const item = estoqueCache.find(i => i.id === m.item_id);
+        const cat = item ? (CATEGORIAS_ESTOQUE[item.categoria] || item.categoria) : 'Outros';
+        porCategoria[cat] = (porCategoria[cat] || 0) + valor;
+      }
+      if(m.timestamp.toMillis() >= inicioHojeTS.toMillis()) hoje += valor;
+    });
+    const cardsF = document.querySelectorAll('#stats-financeiro .stat-card .num');
+    if(cardsF[1]) cardsF[1].textContent = 'R$ ' + hoje.toLocaleString('pt-BR', {minimumFractionDigits:2});
+    if(cardsF[2]) cardsF[2].textContent = 'R$ ' + mes.toLocaleString('pt-BR', {minimumFractionDigits:2});
+
+    renderPieChart('pie-gasto-centro', Object.entries(porCentro).map(([setor, valor], i) => ({
+      label: SETORES[setor] || setor, value: valor, color: PIE_PALETTE[i % PIE_PALETTE.length]
+    })), (v) => 'R$ ' + v.toLocaleString('pt-BR', {minimumFractionDigits:2}));
+
+    renderPieChart('pie-gasto-categoria', Object.entries(porCategoria).map(([cat, valor], i) => ({
+      label: cat, value: valor, color: PIE_PALETTE[i % PIE_PALETTE.length]
+    })), (v) => 'R$ ' + v.toLocaleString('pt-BR', {minimumFractionDigits:2}));
+
+    gastoCentroCache = porCentro;
+    renderOrcamentos(porCentro);
   });
 
-  db.collection('estoque').onSnapshot((qs) => {
-    const el = document.getElementById('estoque-baixo');
+  db.collection('orcamentos_centro_custo').onSnapshot((qs) => {
+    orcamentosCache = {};
+    qs.forEach(doc => { orcamentosCache[doc.id] = doc.data().valor_maximo_mensal || 0; });
+    renderOrcamentos(gastoCentroCache);
+  });
+
+  db.collection('estoque').orderBy('nome').onSnapshot((qs) => {
+    estoqueCache = [];
+    qs.forEach(doc => estoqueCache.push({ id: doc.id, ...doc.data() }));
+
+    let valorTotal = 0;
     const baixos = [];
-    qs.forEach(doc => {
-      const e = doc.data();
-      if(typeof e.estoque_minimo === 'number' && e.quantidade_atual <= e.estoque_minimo){
-        baixos.push(e);
-      }
+    estoqueCache.forEach(e => {
+      valorTotal += (e.quantidade_atual || 0) * (e.custo_unitario_medio || 0);
+      if(typeof e.estoque_minimo === 'number' && e.quantidade_atual <= e.estoque_minimo) baixos.push(e);
     });
+    const cardsF = document.querySelectorAll('#stats-financeiro .stat-card .num');
+    if(cardsF[0]) cardsF[0].textContent = 'R$ ' + valorTotal.toLocaleString('pt-BR', {minimumFractionDigits:2});
+
+    const el = document.getElementById('estoque-baixo');
     if(baixos.length === 0){
       el.innerHTML = '<div class="empty-state">Nenhum item abaixo do mínimo.</div>';
-      return;
+    } else {
+      el.innerHTML = `<table><thead><tr><th>Item</th><th>Categoria</th><th>Atual</th><th>Mínimo</th></tr></thead><tbody>
+        ${baixos.map(e => `<tr>
+          <td>${e.nome}</td>
+          <td class="setor-tag">${CATEGORIAS_ESTOQUE[e.categoria] || e.categoria}</td>
+          <td class="mono" style="color:var(--danger)">${e.quantidade_atual} ${e.unidade}</td>
+          <td class="mono" style="color:var(--text-dim)">${e.estoque_minimo} ${e.unidade}</td>
+        </tr>`).join('')}
+      </tbody></table>`;
     }
-    el.innerHTML = `<table><thead><tr><th>Item</th><th>Categoria</th><th>Atual</th><th>Mínimo</th></tr></thead><tbody>
-      ${baixos.map(e => `<tr>
-        <td>${e.nome}</td>
-        <td class="setor-tag">${CATEGORIAS_ESTOQUE[e.categoria] || e.categoria}</td>
-        <td class="mono" style="color:var(--danger)">${e.quantidade_atual} ${e.unidade}</td>
-        <td class="mono" style="color:var(--text-dim)">${e.estoque_minimo} ${e.unidade}</td>
-      </tr>`).join('')}
-    </tbody></table>`;
   });
 }
 
 // ---------- PAINEL LÍDER ----------
 async function renderLider(){
+  if(currentUserDoc.setor === 'estoque') return renderLiderEstoquista();
+  return renderLiderPadrao();
+}
+
+// ---------- LÍDER — ESTOQUISTA ----------
+async function renderLiderEstoquista(){
   const main = document.getElementById('main-content');
-  const setorNome = SETORES[currentUserDoc.setor] || currentUserDoc.setor;
   main.innerHTML = `
-    <div class="section-title">Painel do Líder — ${setorNome}</div>
-    <div class="section-sub">Abra ordens de serviço, acompanhe a equipe e gerencie o estoque.</div>
+    <div class="section-title">Painel do Líder — Estoque / Almoxarifado</div>
+    <div class="section-sub">Você é o único perfil que cadastra produtos. Aprove solicitações e controle o estoque.</div>
 
     <div class="panel">
-      <h2>Abrir ordem de serviço</h2>
-      <div class="error-msg" id="cad-os-error"></div>
-      <label>Tipo do serviço</label>
-      <input id="os-tipo" placeholder="Ex: cerca danificada, trator quebrado, animal doente">
-      <label>Descrição</label>
-      <input id="os-descricao" placeholder="Detalhes do que precisa ser feito">
-      <label>Localização (opcional)</label>
-      <input id="os-local" placeholder="Ex: Curral 4, Pasto Norte">
-      <button id="btn-cad-os">Abrir ordem de serviço</button>
+      <h2>Solicitações pendentes</h2>
+      <div id="lista-solic-pendentes"><div class="empty-state">Carregando...</div></div>
     </div>
 
     <div class="panel">
-      <h2>Ordens de serviço do setor</h2>
-      <div id="lista-os-lider"><div class="empty-state">Carregando...</div></div>
+      <h2>Estoque baixo</h2>
+      <div class="section-sub" style="margin-bottom:16px;">Dê entrada direto por aqui quando repor.</div>
+      <div id="lista-estoque-baixo-estoquista"><div class="empty-state">Carregando...</div></div>
     </div>
 
     <div class="panel">
-      <h2>Cadastrar item de estoque</h2>
+      <h2>Cadastrar produto</h2>
       <div class="error-msg" id="cad-item-error"></div>
       <div class="row">
         <div><label>Nome do item</label><input id="item-nome" placeholder="Ex: Óleo diesel, Vacina X, Arame"></div>
@@ -664,15 +746,20 @@ async function renderLider(){
         <div><label>Quantidade inicial</label><input id="item-qtd" type="number" step="0.01" placeholder="0"></div>
       </div>
       <div class="row">
-        <div><label>Custo unitário (R$)</label><input id="item-custo" type="number" step="0.01" placeholder="0.00"></div>
+        <div><label>Preço unitário (R$) *</label><input id="item-custo" type="number" step="0.01" placeholder="0.00"></div>
         <div><label>Estoque mínimo (alerta)</label><input id="item-minimo" type="number" step="0.01" placeholder="0"></div>
       </div>
-      <button id="btn-cad-item">Cadastrar item</button>
+      <button id="btn-cad-item">Cadastrar produto</button>
     </div>
 
     <div class="panel">
       <h2>Estoque geral</h2>
       <div id="lista-estoque-lider"><div class="empty-state">Carregando...</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>Histórico de retiradas</h2>
+      <div id="lista-historico-retiradas"><div class="empty-state">Carregando...</div></div>
     </div>
 
     <div class="panel">
@@ -711,26 +798,7 @@ async function renderLider(){
   }));
 
   db.collection('usuarios').where('lider_id', '==', currentUser.uid)
-    .onSnapshot((qs) => {
-      renderListaHierarquia(qs, 'lista-equipe', false);
-    });
-
-  document.getElementById('btn-cad-os').addEventListener('click', () => criarOS({
-    tipo: document.getElementById('os-tipo').value.trim(),
-    descricao: document.getElementById('os-descricao').value.trim(),
-    local: document.getElementById('os-local').value.trim(),
-    errorElId: 'cad-os-error',
-    onSuccess: () => {
-      document.getElementById('os-tipo').value = '';
-      document.getElementById('os-descricao').value = '';
-      document.getElementById('os-local').value = '';
-    }
-  }));
-
-  db.collection('ordens_servico').where('setor', '==', currentUserDoc.setor)
-    .onSnapshot((qs) => {
-      renderListaOS(qs, 'lista-os-lider', false);
-    });
+    .onSnapshot((qs) => renderListaHierarquia(qs, 'lista-equipe', false));
 
   document.getElementById('btn-cad-item').addEventListener('click', () => cadastrarItemEstoque({
     nome: document.getElementById('item-nome').value.trim(),
@@ -749,12 +817,140 @@ async function renderLider(){
   }));
 
   db.collection('estoque').orderBy('nome').onSnapshot((qs) => {
+    estoqueCache = [];
+    qs.forEach(doc => estoqueCache.push({ id: doc.id, ...doc.data() }));
     renderListaEstoque(qs, 'lista-estoque-lider');
+    renderEstoqueBaixoComEntrada();
   });
+
+  db.collection('solicitacoes_estoque').where('status', '==', 'pendente')
+    .onSnapshot((qs) => renderListaSolicitacoes(qs, 'lista-solic-pendentes', { estoquista: true }));
+
+  db.collection('solicitacoes_estoque').where('status', '==', 'retirado')
+    .onSnapshot((qs) => renderHistoricoRetiradas(qs, 'lista-historico-retiradas'));
+}
+
+// ---------- LÍDER — SETORES OPERACIONAIS ----------
+async function renderLiderPadrao(){
+  const main = document.getElementById('main-content');
+  const setorNome = SETORES[currentUserDoc.setor] || currentUserDoc.setor;
+  main.innerHTML = `
+    <div class="section-title">Painel do Líder — ${setorNome}</div>
+    <div class="section-sub">Abra ordens de serviço, solicite produtos ao estoque e acompanhe a equipe.</div>
+
+    <div class="panel">
+      <h2>Abrir ordem de serviço</h2>
+      <div class="error-msg" id="cad-os-error"></div>
+      <label>Tipo do serviço</label>
+      <input id="os-tipo" placeholder="Ex: cerca danificada, trator quebrado, animal doente">
+      <label>Descrição</label>
+      <input id="os-descricao" placeholder="Detalhes do que precisa ser feito">
+      <label>Localização (opcional)</label>
+      <input id="os-local" placeholder="Ex: Curral 4, Pasto Norte">
+      <button id="btn-cad-os">Abrir ordem de serviço</button>
+    </div>
+
+    <div class="panel">
+      <h2>Ordens de serviço do setor</h2>
+      <div id="lista-os-lider"><div class="empty-state">Carregando...</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>Solicitar produto ou peça</h2>
+      <div class="error-msg" id="cad-solic-error"></div>
+      <label>Item</label>
+      <select id="solic-item"><option value="">Carregando estoque...</option></select>
+      <label>Quantidade</label>
+      <input id="solic-qtd" type="number" step="0.01" placeholder="0">
+      <label>Motivo (opcional)</label>
+      <input id="solic-motivo" placeholder="Pra que vai usar">
+      <button id="btn-cad-solic">Enviar solicitação ao estoque</button>
+    </div>
+
+    <div class="panel">
+      <h2>Minhas solicitações</h2>
+      <div id="lista-minhas-solic"><div class="empty-state">Carregando...</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>Cadastrar funcionário</h2>
+      <div class="error-msg" id="cad-func-error"></div>
+      <div class="row">
+        <div><label>Nome</label><input id="func-nome" placeholder="Nome completo"></div>
+        <div><label>Telefone</label><input id="func-telefone" placeholder="(66) 9####-####"></div>
+      </div>
+      <div class="row">
+        <div><label>E-mail</label><input id="func-email" type="email" placeholder="email@exemplo.com"></div>
+        <div><label>Senha provisória</label><input id="func-senha" type="text" placeholder="mínimo 6 caracteres"></div>
+      </div>
+      <button id="btn-cad-func">Cadastrar funcionário</button>
+    </div>
+
+    <div class="panel">
+      <h2>Minha equipe</h2>
+      <div id="lista-equipe"><div class="empty-state">Carregando...</div></div>
+    </div>
+  `;
+
+  document.getElementById('btn-cad-func').addEventListener('click', () => cadastrarUsuario({
+    nome: document.getElementById('func-nome').value.trim(),
+    telefone: document.getElementById('func-telefone').value.trim(),
+    email: document.getElementById('func-email').value.trim(),
+    senha: document.getElementById('func-senha').value,
+    role: 'funcionario',
+    errorElId: 'cad-func-error',
+    onSuccess: () => {
+      document.getElementById('func-nome').value = '';
+      document.getElementById('func-telefone').value = '';
+      document.getElementById('func-email').value = '';
+      document.getElementById('func-senha').value = '';
+    }
+  }));
+
+  db.collection('usuarios').where('lider_id', '==', currentUser.uid)
+    .onSnapshot((qs) => renderListaHierarquia(qs, 'lista-equipe', false));
+
+  document.getElementById('btn-cad-os').addEventListener('click', () => criarOS({
+    tipo: document.getElementById('os-tipo').value.trim(),
+    descricao: document.getElementById('os-descricao').value.trim(),
+    local: document.getElementById('os-local').value.trim(),
+    errorElId: 'cad-os-error',
+    onSuccess: () => {
+      document.getElementById('os-tipo').value = '';
+      document.getElementById('os-descricao').value = '';
+      document.getElementById('os-local').value = '';
+    }
+  }));
+
+  db.collection('ordens_servico').where('setor', '==', currentUserDoc.setor)
+    .onSnapshot((qs) => renderListaOS(qs, 'lista-os-lider', false));
+
+  db.collection('estoque').orderBy('nome').onSnapshot((qs) => {
+    estoqueCache = [];
+    qs.forEach(doc => estoqueCache.push({ id: doc.id, ...doc.data() }));
+    const sel = document.getElementById('solic-item');
+    if(sel) sel.innerHTML = estoqueCache.map(i => `<option value="${i.id}">${i.nome} (${i.quantidade_atual} ${i.unidade} disp.)</option>`).join('') || '<option value="">Nenhum item cadastrado</option>';
+  });
+
+  document.getElementById('btn-cad-solic').addEventListener('click', () => criarSolicitacao({
+    itemId: document.getElementById('solic-item').value,
+    quantidade: document.getElementById('solic-qtd').value,
+    motivo: document.getElementById('solic-motivo').value.trim(),
+    errorElId: 'cad-solic-error',
+    onSuccess: () => {
+      document.getElementById('solic-qtd').value = '';
+      document.getElementById('solic-motivo').value = '';
+    }
+  }));
+
+  db.collection('solicitacoes_estoque').where('solicitante_id', '==', currentUser.uid)
+    .onSnapshot((qs) => renderListaSolicitacoes(qs, 'lista-minhas-solic', { retirar: true }));
 }
 
 // ---------- PAINEL FUNCIONÁRIO ----------
 let estoqueCache = [];
+let orcamentosCache = {};
+let gastoCentroCache = {};
 
 function renderFuncionario(){
   const main = document.getElementById('main-content');
@@ -772,11 +968,30 @@ function renderFuncionario(){
       <h2>Minhas ordens em atendimento</h2>
       <div id="lista-os-minhas"><div class="empty-state">Carregando...</div></div>
     </div>
+
+    <div class="panel">
+      <h2>Solicitar produto ou peça</h2>
+      <div class="error-msg" id="cad-solic-error"></div>
+      <label>Item</label>
+      <select id="solic-item"><option value="">Carregando estoque...</option></select>
+      <label>Quantidade</label>
+      <input id="solic-qtd" type="number" step="0.01" placeholder="0">
+      <label>Motivo (opcional)</label>
+      <input id="solic-motivo" placeholder="Pra que vai usar">
+      <button id="btn-cad-solic">Enviar solicitação ao estoque</button>
+    </div>
+
+    <div class="panel">
+      <h2>Minhas solicitações</h2>
+      <div id="lista-minhas-solic"><div class="empty-state">Carregando...</div></div>
+    </div>
   `;
 
   db.collection('estoque').orderBy('nome').onSnapshot((qs) => {
     estoqueCache = [];
     qs.forEach(doc => estoqueCache.push({ id: doc.id, ...doc.data() }));
+    const sel = document.getElementById('solic-item');
+    if(sel) sel.innerHTML = estoqueCache.map(i => `<option value="${i.id}">${i.nome} (${i.quantidade_atual} ${i.unidade} disp.)</option>`).join('') || '<option value="">Nenhum item cadastrado</option>';
   });
 
   db.collection('ordens_servico')
@@ -792,6 +1007,20 @@ function renderFuncionario(){
     .onSnapshot((qs) => {
       renderListaOS(qs, 'lista-os-minhas', true);
     });
+
+  document.getElementById('btn-cad-solic').addEventListener('click', () => criarSolicitacao({
+    itemId: document.getElementById('solic-item').value,
+    quantidade: document.getElementById('solic-qtd').value,
+    motivo: document.getElementById('solic-motivo').value.trim(),
+    errorElId: 'cad-solic-error',
+    onSuccess: () => {
+      document.getElementById('solic-qtd').value = '';
+      document.getElementById('solic-motivo').value = '';
+    }
+  }));
+
+  db.collection('solicitacoes_estoque').where('solicitante_id', '==', currentUser.uid)
+    .onSnapshot((qs) => renderListaSolicitacoes(qs, 'lista-minhas-solic', { retirar: true }));
 }
 
 // ---------- HELPERS ----------
@@ -960,12 +1189,89 @@ window.concluirOS = async function(osId){
   }
 };
 
+// ---------- GRÁFICOS DE PIZZA ----------
+function renderPieChart(containerId, entries, valueFormatter){
+  const el = document.getElementById(containerId);
+  if(!el) return;
+  const total = entries.reduce((s, e) => s + (e.value || 0), 0);
+  if(total <= 0){
+    el.innerHTML = '<div class="empty-state">Sem dados ainda.</div>';
+    return;
+  }
+  let acc = 0;
+  const stops = entries.map(e => {
+    const start = (acc / total) * 360;
+    acc += e.value;
+    const end = (acc / total) * 360;
+    return `${e.color} ${start}deg ${end}deg`;
+  }).join(', ');
+  const legend = entries.map(e => `
+    <div class="pie-legend-row">
+      <span class="pie-dot" style="background:${e.color}"></span>
+      <span class="pie-label">${e.label}</span>
+      <span class="pie-value">${valueFormatter ? valueFormatter(e.value) : e.value}</span>
+    </div>`).join('');
+  el.innerHTML = `
+    <div class="pie-wrap">
+      <div class="pie-circle" style="background:conic-gradient(${stops})"></div>
+      <div class="pie-legend">${legend}</div>
+    </div>`;
+}
+
+// ---------- ORÇAMENTO POR CENTRO DE CUSTO ----------
+function renderOrcamentos(gastoPorSetor){
+  const el = document.getElementById('lista-orcamentos');
+  if(!el) return;
+  el.innerHTML = Object.entries(SETORES_CENTRO_CUSTO).map(([setor, nome]) => {
+    const gasto = gastoPorSetor[setor] || 0;
+    const orcamento = orcamentosCache[setor] || 0;
+    const estourou = orcamento > 0 && gasto > orcamento;
+    return `
+      <div class="orcamento-row">
+        <div class="orcamento-top">
+          <strong>${nome}</strong>
+          <span class="gasto-atual ${estourou ? 'estourou' : ''}">
+            R$ ${gasto.toLocaleString('pt-BR', {minimumFractionDigits:2})} ${orcamento > 0 ? '/ R$ ' + orcamento.toLocaleString('pt-BR', {minimumFractionDigits:2}) : ''}
+          </span>
+        </div>
+        ${orcamento > 0 ? `<div class="bar-track"><div class="bar-fill" style="width:${Math.min(100, gasto/orcamento*100).toFixed(0)}%; ${estourou ? 'background:var(--danger)' : ''}"></div></div>` : ''}
+        <div class="orcamento-edit">
+          <input id="orc-${setor}" type="number" step="0.01" placeholder="Orçamento mensal (R$)" value="${orcamento || ''}">
+          <button onclick="salvarOrcamento('${setor}')">Salvar</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+window.salvarOrcamento = async function(setor){
+  const input = document.getElementById('orc-' + setor);
+  const valor = parseFloat(input.value);
+  if(isNaN(valor) || valor < 0){
+    showToast('Informe um valor válido.', true);
+    return;
+  }
+  try{
+    await db.collection('orcamentos_centro_custo').doc(setor).set({
+      valor_maximo_mensal: valor,
+      atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    showToast('Orçamento salvo.');
+  }catch(e){
+    showToast('Erro ao salvar orçamento.', true);
+  }
+};
+
 // ---------- ESTOQUE ----------
 async function cadastrarItemEstoque({nome, categoria, unidade, quantidade, custo, minimo, errorElId, onSuccess}){
   const errEl = document.getElementById(errorElId);
   errEl.style.display = 'none';
   if(!nome){
     errEl.textContent = 'Informe o nome do item.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if(!custo || parseFloat(custo) <= 0){
+    errEl.textContent = 'Todo produto precisa ter um preço unitário maior que zero.';
     errEl.style.display = 'block';
     return;
   }
@@ -1003,6 +1309,216 @@ function renderListaEstoque(qs, containerId){
     </tr>`;
   });
   el.innerHTML = `<table><thead><tr><th>Item</th><th>Categoria</th><th>Qtd. atual</th><th>Custo unit.</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderEstoqueBaixoComEntrada(){
+  const el = document.getElementById('lista-estoque-baixo-estoquista');
+  if(!el) return;
+  const baixos = estoqueCache.filter(e => typeof e.estoque_minimo === 'number' && e.quantidade_atual <= e.estoque_minimo);
+  if(baixos.length === 0){
+    el.innerHTML = '<div class="empty-state">Nenhum item abaixo do mínimo.</div>';
+    return;
+  }
+  el.innerHTML = baixos.map(e => `
+    <div class="os-card">
+      <div class="os-top">
+        <div class="os-tipo">${e.nome}</div>
+        <span class="mono" style="color:var(--danger); font-size:12.5px;">${e.quantidade_atual} ${e.unidade} (mín. ${e.estoque_minimo})</span>
+      </div>
+      <div class="item-row">
+        <input id="entrada-${e.id}" type="number" step="0.01" placeholder="Qtd a repor" style="max-width:140px;">
+        <button onclick="darEntradaEstoque('${e.id}')">Dar entrada</button>
+      </div>
+    </div>`).join('');
+}
+
+window.darEntradaEstoque = async function(itemId){
+  const input = document.getElementById('entrada-' + itemId);
+  const qtd = parseFloat(input.value);
+  if(!qtd || qtd <= 0){
+    showToast('Informe uma quantidade válida.', true);
+    return;
+  }
+  const item = estoqueCache.find(i => i.id === itemId);
+  if(!item) return;
+  try{
+    const itemRef = db.collection('estoque').doc(itemId);
+    const movRef = db.collection('movimentacoes_estoque').doc();
+    await db.runTransaction(async (t) => {
+      const snap = await t.get(itemRef);
+      const atual = snap.data().quantidade_atual || 0;
+      t.update(itemRef, { quantidade_atual: atual + qtd, atualizado_em: firebase.firestore.FieldValue.serverTimestamp() });
+      t.set(movRef, {
+        item_id: itemId, item_nome: item.nome, tipo: 'entrada', quantidade: qtd,
+        valor_unitario: item.custo_unitario_medio || 0, valor_total: qtd * (item.custo_unitario_medio || 0),
+        origem: 'reposicao', os_id: null, centro_custo: null,
+        responsavel_id: currentUser.uid, responsavel_nome: currentUserDoc.nome,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    });
+    showToast('Entrada registrada.');
+    input.value = '';
+  }catch(e){
+    showToast('Erro ao registrar entrada.', true);
+  }
+};
+
+// ---------- SOLICITAÇÕES DE PRODUTO ----------
+async function criarSolicitacao({itemId, quantidade, motivo, errorElId, onSuccess}){
+  const errEl = document.getElementById(errorElId);
+  errEl.style.display = 'none';
+  const qtd = parseFloat(quantidade);
+  if(!itemId || !qtd || qtd <= 0){
+    errEl.textContent = 'Selecione um item e uma quantidade válida.';
+    errEl.style.display = 'block';
+    return;
+  }
+  const item = estoqueCache.find(i => i.id === itemId);
+  if(!item){
+    errEl.textContent = 'Item não encontrado.';
+    errEl.style.display = 'block';
+    return;
+  }
+  try{
+    await db.collection('solicitacoes_estoque').add({
+      item_id: itemId,
+      item_nome: item.nome,
+      unidade: item.unidade,
+      quantidade_solicitada: qtd,
+      custo_unitario: item.custo_unitario_medio || 0,
+      valor_estimado: qtd * (item.custo_unitario_medio || 0),
+      solicitante_id: currentUser.uid,
+      solicitante_nome: currentUserDoc.nome,
+      centro_custo: currentUserDoc.setor,
+      motivo: motivo || '',
+      status: 'pendente',
+      criado_em: firebase.firestore.FieldValue.serverTimestamp(),
+      aprovado_por: null, aprovado_por_nome: null, aprovado_em: null,
+      retirado_por: null, retirado_por_nome: null, retirado_em: null
+    });
+    showToast('Solicitação enviada ao estoque.');
+    if(onSuccess) onSuccess();
+  }catch(e){
+    errEl.textContent = 'Erro ao enviar solicitação.';
+    errEl.style.display = 'block';
+  }
+}
+
+function renderListaSolicitacoes(qs, containerId, opts){
+  opts = opts || {};
+  const el = document.getElementById(containerId);
+  if(!el) return;
+  if(qs.empty){
+    el.innerHTML = '<div class="empty-state">Nada por aqui.</div>';
+    return;
+  }
+  let html = '';
+  qs.forEach(doc => {
+    const s = doc.data();
+    const id = doc.id;
+    html += `
+      <div class="os-card">
+        <div class="os-top">
+          <div class="os-tipo">${s.quantidade_solicitada} ${s.unidade} — ${s.item_nome}</div>
+          <span class="badge ${s.status}">${STATUS_SOLIC_LABEL[s.status] || s.status}</span>
+        </div>
+        <div class="os-desc">${s.motivo || ''}</div>
+        <div class="os-meta">${s.solicitante_nome} · ${SETORES[s.centro_custo] || s.centro_custo}${s.aprovado_por_nome ? ' · aprovado por ' + s.aprovado_por_nome : ''}</div>
+        ${opts.estoquista && s.status === 'pendente' ? `
+          <div class="os-actions">
+            <button onclick="aprovarSolicitacao('${id}')">Aprovar</button>
+            <button class="secondary" onclick="negarSolicitacao('${id}')">Negar</button>
+          </div>` : ''}
+        ${opts.retirar && s.status === 'aprovado' && s.solicitante_id === currentUser.uid ? `
+          <div class="os-actions">
+            <button onclick="retirarProduto('${id}')">Retirar produto</button>
+          </div>` : ''}
+      </div>`;
+  });
+  el.innerHTML = html;
+}
+
+window.aprovarSolicitacao = async function(id){
+  try{
+    await db.collection('solicitacoes_estoque').doc(id).update({
+      status: 'aprovado',
+      aprovado_por: currentUser.uid,
+      aprovado_por_nome: currentUserDoc.nome,
+      aprovado_em: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    showToast('Solicitação aprovada.');
+  }catch(e){
+    showToast('Erro ao aprovar.', true);
+  }
+};
+
+window.negarSolicitacao = async function(id){
+  try{
+    await db.collection('solicitacoes_estoque').doc(id).update({
+      status: 'negado',
+      aprovado_por: currentUser.uid,
+      aprovado_por_nome: currentUserDoc.nome,
+      aprovado_em: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    showToast('Solicitação negada.');
+  }catch(e){
+    showToast('Erro ao negar.', true);
+  }
+};
+
+window.retirarProduto = async function(id){
+  try{
+    const solicRef = db.collection('solicitacoes_estoque').doc(id);
+    await db.runTransaction(async (t) => {
+      const solicSnap = await t.get(solicRef);
+      const s = solicSnap.data();
+      if(s.status !== 'aprovado') throw new Error('Esta solicitação não está mais disponível para retirada.');
+      const itemRef = db.collection('estoque').doc(s.item_id);
+      const itemSnap = await t.get(itemRef);
+      const atual = itemSnap.data().quantidade_atual || 0;
+      if(s.quantidade_solicitada > atual) throw new Error('Estoque insuficiente no momento da retirada.');
+      t.update(itemRef, { quantidade_atual: atual - s.quantidade_solicitada, atualizado_em: firebase.firestore.FieldValue.serverTimestamp() });
+      t.update(solicRef, {
+        status: 'retirado',
+        retirado_por: currentUser.uid,
+        retirado_por_nome: currentUserDoc.nome,
+        retirado_em: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      const movRef = db.collection('movimentacoes_estoque').doc();
+      t.set(movRef, {
+        item_id: s.item_id, item_nome: s.item_nome, tipo: 'saida', quantidade: s.quantidade_solicitada,
+        valor_unitario: s.custo_unitario || 0, valor_total: s.valor_estimado || 0,
+        origem: 'solicitacao', os_id: null, solicitacao_id: id, centro_custo: s.centro_custo,
+        responsavel_id: currentUser.uid, responsavel_nome: currentUserDoc.nome,
+        liberado_por_nome: s.aprovado_por_nome || null,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    });
+    showToast('Produto retirado do estoque.');
+  }catch(e){
+    showToast(e.message || 'Erro ao retirar produto.', true);
+  }
+};
+
+function renderHistoricoRetiradas(qs, containerId){
+  const el = document.getElementById(containerId);
+  if(!el) return;
+  if(qs.empty){
+    el.innerHTML = '<div class="empty-state">Nenhuma retirada registrada ainda.</div>';
+    return;
+  }
+  const linhas = [];
+  qs.forEach(doc => linhas.push(doc.data()));
+  linhas.sort((a, b) => (b.retirado_em ? b.retirado_em.toMillis() : 0) - (a.retirado_em ? a.retirado_em.toMillis() : 0));
+  el.innerHTML = `<table><thead><tr><th>Item</th><th>Qtd</th><th>Quem pegou</th><th>Quem liberou</th><th>Centro de custo</th></tr></thead><tbody>
+    ${linhas.slice(0, 40).map(s => `<tr>
+      <td>${s.item_nome}</td>
+      <td class="mono">${s.quantidade_solicitada} ${s.unidade}</td>
+      <td>${s.retirado_por_nome || '—'}</td>
+      <td>${s.aprovado_por_nome || '—'}</td>
+      <td class="setor-tag">${SETORES[s.centro_custo] || s.centro_custo}</td>
+    </tr>`).join('')}
+  </tbody></table>`;
 }
 
 async function cadastrarUsuario({nome, telefone, email, senha, role, setor, errorElId, onSuccess}){
